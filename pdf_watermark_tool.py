@@ -12,21 +12,30 @@ import shutil
 import time
 import subprocess
 import platform
+import argparse
 
 class PDFWatermarkApp(TkinterDnD.Tk):
-    def __init__(self):
+    def __init__(self, use_gui=True, watermark_path=None, watermark2_path=None, doc_index=1):
         super().__init__()
-        self.title("PDF Watermark Tool")
-        self.geometry("800x600")
+        self.use_gui = use_gui
+        self.watermark_path = watermark_path or "wasserzeichen/wasserzeichen.png"
+        self.watermark2_path = watermark2_path or "wasserzeichen/wasserzeichen2.png"
+        self.doc_index = doc_index
+        if self.use_gui:
+            self.title("PDF Watermark Tool")
+            self.geometry("800x600")
         
         self.pdf_path = ""
-        self.watermark_path = "wasserzeichen/wasserzeichen.png"
-        self.watermark2_path = "wasserzeichen/wasserzeichen2.png"
         self.thumbnail_width, self.thumbnail_height = 403, 236
         self.output_folder = ""
         self.preview_images = []
         
-        self.create_widgets()
+        if self.use_gui:
+            self.create_widgets()
+        else:
+            self.watermark_pages_entry = "2-"
+            self.blur_pages_entry = "2-"
+            self.blur_strength = 5
     
     def create_widgets(self):
         self.label = tk.Label(self, text="PDF hierher ziehen oder Datei auswählen", pady=10)
@@ -120,12 +129,6 @@ class PDFWatermarkApp(TkinterDnD.Tk):
         self.process_button.config(state="normal")
         threading.Thread(target=self.convert_pdf_to_images).start()
 
-        os.makedirs(self.output_folder, exist_ok=True)
-        self.reset_inputs()
-        self.label.config(text=f"Ausgewählte Datei: {self.pdf_path}")
-        self.process_button.config(state="normal")
-        threading.Thread(target=self.convert_pdf_to_images).start()
-
     def clear_preview_images(self):
         for widget in self.preview_frame.winfo_children():
             widget.destroy()
@@ -141,9 +144,10 @@ class PDFWatermarkApp(TkinterDnD.Tk):
     def loading_animation(self, text):
         for _ in range(10):
             for symbol in "|/-\\":
-                self.loading_label.config(text=f"{text} {symbol}")
-                time.sleep(0.1)
-                self.loading_label.update()
+                if self.use_gui:
+                    self.loading_label.config(text=f"{text} {symbol}")
+                    time.sleep(0.1)
+                    self.loading_label.update()
 
     def convert_pdf_to_images(self):
         threading.Thread(target=self.loading_animation, args=("PDF wird konvertiert...",)).start()
@@ -157,7 +161,8 @@ class PDFWatermarkApp(TkinterDnD.Tk):
             thumbnail_img = ImageTk.PhotoImage(thumbnail)
             self.preview_images.append(thumbnail_img)
             tk.Label(self.preview_frame, image=thumbnail_img).grid(row=i // 10, column=i % 10)  # 10 images per row
-        self.loading_label.config(text="")
+        if self.use_gui:
+            self.loading_label.config(text="")
         self.update()
 
     def parse_page_input(self, input_str, total_pages):
@@ -179,12 +184,15 @@ class PDFWatermarkApp(TkinterDnD.Tk):
 
     def process_pdf(self):
         if not self.pdf_path:
-            messagebox.showwarning("Warnung", "Bitte eine PDF-Datei auswählen.")
+            if self.use_gui:
+                messagebox.showwarning("Warnung", "Bitte eine PDF-Datei auswählen.")
+            else:
+                print("Bitte eine PDF-Datei auswählen.")
             return
 
-        watermark_pages_input = self.watermark_pages_entry.get()
-        blur_pages_input = self.blur_pages_entry.get()
-        blur_strength = self.blur_slider.get()
+        watermark_pages_input = self.watermark_pages_entry if self.use_gui else "2-"
+        blur_pages_input = self.blur_pages_entry if self.use_gui else "2-"
+        blur_strength = self.blur_slider.get() if self.use_gui else self.blur_strength
 
         try:
             images = convert_from_path(self.pdf_path)
@@ -197,7 +205,8 @@ class PDFWatermarkApp(TkinterDnD.Tk):
             watermark2 = Image.open(self.watermark2_path).convert("RGBA")
             watermark2.thumbnail((self.thumbnail_width, self.thumbnail_height))
 
-            self.loading_label.config(text="Bilder werden verarbeitet...")
+            if self.use_gui:
+                self.loading_label.config(text="Bilder werden verarbeitet...")
 
             threads = []
             for i, image in enumerate(images, start=1):
@@ -209,16 +218,21 @@ class PDFWatermarkApp(TkinterDnD.Tk):
                 t.join()
 
             self.cleanup_temp_files()
-            self.update_thumbnails(watermark_pages, blur_pages)
-            self.show_success_dialog()
-            self.toggle_inputs("normal")
+            if self.use_gui:
+                self.update_thumbnails(watermark_pages, blur_pages)
+                self.show_success_dialog()
+                self.toggle_inputs("normal")
                 
         except Exception as e:
-            self.toggle_inputs("normal")
-            messagebox.showerror("Fehler", f"Ein Fehler ist aufgetreten: {e}")
+            if self.use_gui:
+                self.toggle_inputs("normal")
+                messagebox.showerror("Fehler", f"Ein Fehler ist aufgetreten: {e}")
+            else:
+                print(f"Ein Fehler ist aufgetreten: {e}")
         
         finally:
-            self.loading_label.config(text="")
+            if self.use_gui:
+                self.loading_label.config(text="")
 
     def show_success_dialog(self):
         dialog = tk.Toplevel(self)
@@ -253,7 +267,7 @@ class PDFWatermarkApp(TkinterDnD.Tk):
                 watermark = watermark1 if watermark_path == self.watermark_path else watermark2
                 image.paste(watermark, (x, y), watermark)
 
-        output_path = os.path.join(self.output_folder, f"Seite_{i:03d}.png")
+        output_path = os.path.join(self.output_folder, f"Seite_{self.doc_index:02d}_{i:03d}.png")
         image.save(output_path, "PNG")
 
     def generate_watermark_positions(self, image_size, watermark_size):
@@ -291,8 +305,26 @@ class PDFWatermarkApp(TkinterDnD.Tk):
             if file.endswith("_temp.png"):
                 os.remove(os.path.join(self.output_folder, file))
         print("Temporäre Dateien wurden gelöscht.")
-        self.loading_label.config(text="")
+        if self.use_gui:
+            self.loading_label.config(text="")
+
+def main():
+    parser = argparse.ArgumentParser(description='PDF Watermark Tool')
+    parser.add_argument('--input', required=True, help='Input directory containing PDF files')
+    parser.add_argument('--output', required=True, help='Output directory for processed files')
+    parser.add_argument('--blur-strength', type=int, default=5, help='Strength of the blur effect')
+    parser.add_argument('--blur-pages', default='2-', help='Pages to apply the blur effect')
+    parser.add_argument('--watermark-path', required=True, help='Path to the first watermark image')
+    parser.add_argument('--watermark2-path', required=True, help='Path to the second watermark image')
+    parser.add_argument('--doc-index', type=int, default=1, help='Document index for output file naming')
+    args = parser.parse_args()
+
+    app = PDFWatermarkApp(use_gui=False, watermark_path=args.watermark_path, watermark2_path=args.watermark2_path, doc_index=args.doc_index)
+    app.pdf_path = args.input
+    app.output_folder = args.output
+    app.blur_strength = args.blur_strength
+    app.blur_pages_entry = args.blur_pages
+    app.process_pdf()
 
 if __name__ == "__main__":
-    app = PDFWatermarkApp()
-    app.mainloop()
+    main()
