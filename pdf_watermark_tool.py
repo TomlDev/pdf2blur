@@ -13,29 +13,39 @@ import time
 import subprocess
 import platform
 import argparse
+from io import BytesIO
 
 class PDFWatermarkApp(TkinterDnD.Tk):
-    def __init__(self, use_gui=True, watermark_path=None, watermark2_path=None, doc_index=1):
+    def __init__(self, use_gui=True, watermark_path=None, watermark2_path=None, doc_index=1,
+                 output_format="WEBP", quality=75, png_compress_level=6, webp_lossless=False,
+                 target_max_kb=0, max_width=0, max_height=0, quantize_colors=0):
         super().__init__()
         self.use_gui = use_gui
         self.watermark_path = watermark_path or "wasserzeichen/wasserzeichen.png"
         self.watermark2_path = watermark2_path or "wasserzeichen/wasserzeichen2.png"
         self.doc_index = doc_index
+        self.output_format = output_format.upper()
+        self.quality = int(quality)
+        self.png_compress_level = int(png_compress_level)
+        self.webp_lossless = bool(webp_lossless)
+        self.target_max_kb = int(target_max_kb)
+        self.max_width = int(max_width)
+        self.max_height = int(max_height)
+        self.quantize_colors = int(quantize_colors)
         if self.use_gui:
             self.title("PDF Watermark Tool")
             self.geometry("800x600")
-        
         self.pdf_path = ""
         self.thumbnail_width, self.thumbnail_height = 403, 236
         self.output_folder = ""
         self.preview_images = []
-        
         if self.use_gui:
             self.create_widgets()
         else:
             self.watermark_pages_entry = "2-"
             self.blur_pages_entry = "2-"
             self.blur_strength = 5
+
     
     def create_widgets(self):
         self.label = tk.Label(self, text="PDF hierher ziehen oder Datei auswählen", pady=10)
@@ -256,6 +266,54 @@ class PDFWatermarkApp(TkinterDnD.Tk):
         else:  # Linux
             subprocess.Popen(["xdg-open", self.output_folder])
 
+    def save_with_compression(self, image, output_base):
+        fmt = self.output_format
+        if self.max_width > 0 or self.max_height > 0:
+            w, h = image.size
+            tw = self.max_width if self.max_width > 0 else w
+            th = self.max_height if self.max_height > 0 else h
+            image = image.copy()
+            image.thumbnail((tw, th))
+        if fmt == "PNG" and self.quantize_colors > 0:
+            image = image.convert("RGB").quantize(colors=self.quantize_colors, method=Image.MEDIANCUT)
+        if fmt == "JPEG":
+            if image.mode in ("RGBA", "P"):
+                image = image.convert("RGB")
+        ext = {"JPEG": "jpg", "JPG": "jpg", "PNG": "png", "WEBP": "webp"}.get(fmt, fmt.lower())
+        out_path = f"{output_base}.{ext}"
+        params = {}
+        if fmt == "JPEG":
+            params.update({"optimize": True, "progressive": True, "quality": self.quality, "subsampling": "keep"})
+        elif fmt == "PNG":
+            params.update({"optimize": True, "compress_level": max(0, min(9, self.png_compress_level))})
+        elif fmt == "WEBP":
+            if self.webp_lossless:
+                params.update({"lossless": True, "quality": 100})
+            else:
+                params.update({"quality": self.quality, "method": 6})
+        if self.target_max_kb > 0 and fmt in ("JPEG", "WEBP") and not self.webp_lossless:
+            lo, hi = 30, max(30, min(100, self.quality))
+            best_bytes = None
+            best_buf = None
+            while lo <= hi:
+                q = (lo + hi) // 2
+                buf = BytesIO()
+                p = dict(params)
+                p["quality"] = q
+                image.save(buf, format=fmt, **p)
+                size_kb = buf.tell() // 1024
+                if size_kb <= self.target_max_kb:
+                    best_bytes = buf.getvalue()
+                    best_buf = True
+                    hi = q - 1
+                else:
+                    lo = q + 1
+            if best_buf:
+                with open(out_path, "wb") as f:
+                    f.write(best_bytes)
+                return out_path
+        image.save(out_path, format=fmt, **params)
+        return out_path
 
     def process_page(self, i, image, watermark1, watermark2, watermark_pages, blur_pages, blur_strength):
         if i in blur_pages and blur_strength > 0:
@@ -267,8 +325,10 @@ class PDFWatermarkApp(TkinterDnD.Tk):
                 watermark = watermark1 if watermark_path == self.watermark_path else watermark2
                 image.paste(watermark, (x, y), watermark)
 
-        output_path = os.path.join(self.output_folder, f"Seite_{self.doc_index:02d}_{i:03d}.png")
-        image.save(output_path, "PNG")
+        # output_path = os.path.join(self.output_folder, f"Seite_{self.doc_index:02d}_{i:03d}.png")
+        # image.save(output_path, "PNG")
+        output_base = os.path.join(self.output_folder, f"Seite_{self.doc_index:02d}_{i:03d}")
+        self.save_with_compression(image, output_base)
 
     def generate_watermark_positions(self, image_size, watermark_size):
         positions = []
@@ -317,9 +377,30 @@ def main():
     parser.add_argument('--watermark-path', required=True, help='Path to the first watermark image')
     parser.add_argument('--watermark2-path', required=True, help='Path to the second watermark image')
     parser.add_argument('--doc-index', type=int, default=1, help='Document index for output file naming')
+    parser.add_argument('--output-format', default='WEBP', choices=['JPEG', 'PNG', 'WEBP'])
+    parser.add_argument('--quality', type=int, default=85)
+    parser.add_argument('--png-compress-level', type=int, default=3)
+    parser.add_argument('--webp-lossless', action='store_true')
+    parser.add_argument('--target-max-kb', type=int, default=0)
+    parser.add_argument('--max-width', type=int, default=0)
+    parser.add_argument('--max-height', type=int, default=0)
+    parser.add_argument('--quantize-colors', type=int, default=0)
     args = parser.parse_args()
 
-    app = PDFWatermarkApp(use_gui=False, watermark_path=args.watermark_path, watermark2_path=args.watermark2_path, doc_index=args.doc_index)
+    app = PDFWatermarkApp(
+        use_gui=False,
+        watermark_path=args.watermark_path,
+        watermark2_path=args.watermark2_path,
+        doc_index=args.doc_index,
+        output_format=args.output_format,
+        quality=args.quality,
+        png_compress_level=args.png_compress_level,
+        webp_lossless=args.webp_lossless,
+        target_max_kb=args.target_max_kb,
+        max_width=args.max_width,
+        max_height=args.max_height,
+        quantize_colors=args.quantize_colors
+    )
     app.pdf_path = args.input
     app.output_folder = args.output
     app.blur_strength = args.blur_strength
