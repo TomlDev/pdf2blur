@@ -200,7 +200,7 @@ class PDFWatermarkApp(TkinterDnD.Tk):
                 print("Bitte eine PDF-Datei auswählen.")
             return
 
-        watermark_pages_input = self.watermark_pages_entry if self.use_gui else "2-"
+        watermark_pages_input = self.watermark_pages_entry if self.use_gui else self.watermark_pages_entry
         blur_pages_input = self.blur_pages_entry if self.use_gui else "2-"
         blur_strength = self.blur_slider.get() if self.use_gui else self.blur_strength
 
@@ -374,6 +374,7 @@ def main():
     parser.add_argument('--output', required=True, help='Output directory for processed files')
     parser.add_argument('--blur-strength', type=int, default=5, help='Strength of the blur effect')
     parser.add_argument('--blur-pages', default='2-', help='Pages to apply the blur effect')
+    parser.add_argument('--watermark-pages', default='2-', help='Pages to apply the watermark (e.g. "1-" to watermark the first page of a single-page material)')
     parser.add_argument('--watermark-path', required=True, help='Path to the first watermark image')
     parser.add_argument('--watermark2-path', required=True, help='Path to the second watermark image')
     parser.add_argument('--doc-index', type=int, default=1, help='Document index for output file naming')
@@ -405,6 +406,7 @@ def main():
     app.output_folder = args.output
     app.blur_strength = args.blur_strength
     app.blur_pages_entry = args.blur_pages
+    app.watermark_pages_entry = args.watermark_pages
     app.process_pdf()
 
 if __name__ == "__main__":
