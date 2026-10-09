@@ -175,6 +175,15 @@ class PDFWatermarkApp(TkinterDnD.Tk):
             self.loading_label.config(text="")
         self.update()
 
+    @staticmethod
+    def is_blank_page(image):
+        """True, wenn die Seite praktisch einfarbig hell ist (keine Schrift, keine Bilder)."""
+        g = image.convert("L")
+        g.thumbnail((300, 300))
+        lo, hi = g.getextrema()
+        mean = sum(g.getdata()) / max(1, g.width * g.height)
+        return (hi - lo) <= 12 and mean >= 235
+
     def parse_page_input(self, input_str, total_pages):
         pages = set()
         parts = input_str.split(',')
@@ -206,6 +215,12 @@ class PDFWatermarkApp(TkinterDnD.Tk):
 
         try:
             images = convert_from_path(self.pdf_path)
+            # Leere Seiten (komplett einfarbig weiß, z. B. Leerseite vor dem Titelblatt) gehören nicht in die Produktbilder:
+            # sonst wäre das erste Galeriebild leer und das echte Titelblatt wird verwischt. Mindestens eine Seite bleibt.
+            kept = [im for im in images if not self.is_blank_page(im)]
+            if kept and len(kept) < len(images):
+                print(f"{len(images) - len(kept)} leere Seite(n) übersprungen")
+                images = kept
             total_pages = len(images)
             watermark_pages = self.parse_page_input(watermark_pages_input, total_pages) if watermark_pages_input else set(range(1, total_pages + 1))
             blur_pages = self.parse_page_input(blur_pages_input, total_pages) if blur_pages_input else set()
